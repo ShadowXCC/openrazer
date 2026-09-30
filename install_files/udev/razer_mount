@@ -35,6 +35,27 @@ DEVICE_ID=$2
 mesg "Driver $DRIVER"
 mesg "Device_ID $DEVICE_ID"
 
+# USB interface for razerkraken's usb driver (the Kraken V3 Pro's CDC control interface):
+# take it from cdc_acm. Runs again on our own bind event, which finds it done.
+if [ "$DRIVER" = "razerkraken_cdc" ] ; then
+	if [ ! -d /sys/bus/usb/drivers/"$DRIVER" ] ; then
+		mesg "Modprobing razerkraken"
+		modprobe razerkraken
+		sleep 0.05
+	fi
+	if [ -d /sys/bus/usb/drivers/"$DRIVER"/"$DEVICE_ID" ] ; then
+		exit 0
+	fi
+	if [ -d /sys/bus/usb/drivers/cdc_acm/"$DEVICE_ID" ] ; then
+		mesg "Unbinding $DEVICE_ID from cdc_acm"
+		printf '%s' "$DEVICE_ID" > /sys/bus/usb/drivers/cdc_acm/unbind
+	fi
+	mesg "Binding $DEVICE_ID to $DRIVER"
+	# May lose a race with cdc_acm on add; its bind event brings us back here.
+	printf '%s' "$DEVICE_ID" > /sys/bus/usb/drivers/"$DRIVER"/bind || true
+	exit 0
+fi
+
 if [ ! -d /sys/bus/hid/drivers/"$DRIVER" ] ; then
 	mesg "Modprobing $DRIVER"
 	modprobe "$DRIVER"

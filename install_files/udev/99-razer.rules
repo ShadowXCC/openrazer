@@ -1,3 +1,9 @@
+# Kraken V3 Pro dongle (052c): its settings go over CDC interface 4, which cdc_acm would otherwise
+# take. Keep ModemManager off the port, and hand the interface to razerkraken's usb driver, on add
+# and whenever cdc_acm binds it.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="052c", ENV{ID_MM_DEVICE_IGNORE}="1"
+ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="052c", ATTR{bInterfaceNumber}=="04", RUN+="razer_mount razerkraken_cdc $kernel"
+
 ACTION!="add", GOTO="razer_end"
 SUBSYSTEMS=="usb|input|hid", ATTRS{idVendor}=="1532", GOTO="razer_vendor"
 GOTO="razer_end"
@@ -15,7 +21,7 @@ ATTRS{idProduct}=="010d|010e|010f|0111|0113|0118|011a|011b|011c|0201|0202|0203|0
     ENV{ID_RAZER_CHROMA}="1", ENV{RAZER_DRIVER}="razerkbd"
 
 # Kraken
-ATTRS{idProduct}=="0501|0504|0506|0510|0520|0527|0560", \
+ATTRS{idProduct}=="0501|0504|0506|0510|0520|0527|052c|0560", \
     ATTRS{idVendor}=="1532", \
     ENV{ID_RAZER_CHROMA}="1", ENV{RAZER_DRIVER}="razerkraken"
 

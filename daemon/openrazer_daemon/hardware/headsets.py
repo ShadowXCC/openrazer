@@ -202,6 +202,25 @@ class RazerKrakenUltimate(__RazerDevice):
             _dbus_chroma.set_breath_triple_effect(self, *args)
 
 
+class RazerKrakenV3Pro(__RazerDeviceBrightnessSuspend):
+    """
+    Class for the Razer Kraken V3 Pro (HyperSpeed dongle)
+
+    Settings travel over the dongle's CDC interface (see driver/razerkraken_v3pro.c). Spectrum is
+    the headset's own rainbow cycle. Thanks to paladin-devops (#2884) for the first lighting work.
+    """
+    EVENT_FILE_REGEX = re.compile(r'.*Razer_Kraken_V3_Pro-event-if03')
+
+    USB_VID = 0x1532
+    USB_PID = 0x052C
+    METHODS = ['get_device_type_headset',
+               'set_static_effect', 'set_spectrum_effect', 'set_none_effect',
+               'get_battery', 'is_charging', 'get_idle_time', 'set_idle_time',
+               'get_sidetone', 'set_sidetone', 'get_haptic_intensity', 'set_haptic_intensity']
+
+    DEVICE_IMAGE = "https://assets3.razerzone.com/qJyFg5OTeAdMCtwboWHEvMexeDQ=/1500x1000/https%3A%2F%2Fmedias-p1.phoenix.razer.com%2Fsys-master-phoenix-images-container%2Fha7%2Fh93%2F9248880263198%2F211021-kraken-v3-pro-1500x1000-6.jpg"
+
+
 class RazerKrakenKittyEdition(__RazerDeviceBrightnessSuspend):
     """
     Class for the Razer Kraken Kitty Edition

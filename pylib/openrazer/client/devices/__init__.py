@@ -57,6 +57,9 @@ class RazerDevice(object):
             'get_low_battery_threshold': self._has_feature('razer.device.power', 'getLowBatteryThreshold'),
             'set_low_battery_threshold': self._has_feature('razer.device.power', 'setLowBatteryThreshold'),
 
+            'sidetone': self._has_feature('razer.device.audio', ('getSidetone', 'setSidetone')),
+            'haptic_intensity': self._has_feature('razer.device.haptics', ('getHapticIntensity', 'setHapticIntensity')),
+
             'macro_logic': self._has_feature('razer.device.macro'),
             'keyboard_layout': self._has_feature('razer.device.misc', 'getKeyboardLayout'),
             'game_mode_led': self._has_feature('razer.device.led.gamemode'),
@@ -241,6 +244,10 @@ class RazerDevice(object):
             self._dbus_interfaces['dpi'] = _dbus.Interface(self._dbus, "razer.device.dpi")
         if self.has('battery'):
             self._dbus_interfaces['power'] = _dbus.Interface(self._dbus, "razer.device.power")
+        if self.has('sidetone'):
+            self._dbus_interfaces['audio'] = _dbus.Interface(self._dbus, "razer.device.audio")
+        if self.has('haptic_intensity'):
+            self._dbus_interfaces['haptics'] = _dbus.Interface(self._dbus, "razer.device.haptics")
         if self.has('game_mode_led'):
             self._dbus_interfaces['game_mode_led'] = _dbus.Interface(self._dbus, "razer.device.led.gamemode")
         if self.has('keyswitch_optimization'):
@@ -498,6 +505,54 @@ class RazerDevice(object):
         """
         if self.has('battery'):
             return int(self._dbus_interfaces['power'].getIdleTime())
+        else:
+            raise NotImplementedError()
+
+    @property
+    def sidetone(self) -> int:
+        """
+        Get the sidetone level
+
+        :return: 0 (off) to 100, or -1 if the device can't report it yet
+        """
+        if self.has('sidetone'):
+            return int(self._dbus_interfaces['audio'].getSidetone())
+        else:
+            raise NotImplementedError()
+
+    @sidetone.setter
+    def sidetone(self, value: int) -> None:
+        """
+        Set the sidetone level
+
+        :param value: 0 (off) to 100
+        """
+        if self.has('sidetone'):
+            self._dbus_interfaces['audio'].setSidetone(value)
+        else:
+            raise NotImplementedError()
+
+    @property
+    def haptic_intensity(self) -> int:
+        """
+        Get the haptic feedback intensity
+
+        :return: 0 (off), 1 (low), 2 (medium), 3 (high), or -1 if the device can't report it yet
+        """
+        if self.has('haptic_intensity'):
+            return int(self._dbus_interfaces['haptics'].getHapticIntensity())
+        else:
+            raise NotImplementedError()
+
+    @haptic_intensity.setter
+    def haptic_intensity(self, value: int) -> None:
+        """
+        Set the haptic feedback intensity
+
+        :param value: 0 (off), 1 (low), 2 (medium), 3 (high)
+        """
+        if self.has('haptic_intensity'):
+            self._dbus_interfaces['haptics'].setHapticIntensity(value)
         else:
             raise NotImplementedError()
 

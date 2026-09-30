@@ -12,6 +12,7 @@
 #include <linux/random.h>
 
 #include "razerkraken_driver.h"
+#include "razerkraken_v3pro.h"
 #include "razercommon.h"
 
 /*
@@ -219,6 +220,10 @@ static ssize_t razer_attr_read_device_type(struct device *dev, struct device_att
         device_type = "Razer Kraken Kitty V2";
         break;
 
+    case USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO:
+        device_type = "Razer Kraken V3 Pro";
+        break;
+
     default:
         device_type = "Unknown Device";
     }
@@ -257,6 +262,10 @@ static ssize_t razer_attr_write_matrix_effect_spectrum(struct device *dev, struc
     struct razer_kraken_request_report report = get_kraken_request_report(0x04, 0x40, 0x01, device->led_mode_address);
     union razer_kraken_effect_byte effect_byte = get_kraken_effect_byte();
 
+    if(device->v3p) {
+        return kv3p_store_effect(device->v3p, KV3P_EFFECT_SPECTRUM, buf, count);
+    }
+
     // Spectrum Cycling | ON
     effect_byte.bits.on_off_static = 1;
     effect_byte.bits.spectrum_cycling = 1;
@@ -281,6 +290,10 @@ static ssize_t razer_attr_write_matrix_effect_none(struct device *dev, struct de
     struct razer_kraken_device *device = dev_get_drvdata(dev);
     struct razer_kraken_request_report report = get_kraken_request_report(0x04, 0x40, 0x01, device->led_mode_address);
     union razer_kraken_effect_byte effect_byte = get_kraken_effect_byte();
+
+    if(device->v3p) {
+        return kv3p_store_effect(device->v3p, KV3P_EFFECT_NONE, buf, count);
+    }
 
     // Spectrum Cycling | OFF
     effect_byte.bits.on_off_static = 0;
@@ -307,6 +320,10 @@ static ssize_t razer_attr_write_matrix_effect_static(struct device *dev, struct 
     struct razer_kraken_request_report rgb_report = get_kraken_request_report(0x04, 0x40, count, device->breathing_address[0]);
     struct razer_kraken_request_report effect_report = get_kraken_request_report(0x04, 0x40, 0x01, device->led_mode_address);
     union razer_kraken_effect_byte effect_byte = get_kraken_effect_byte();
+
+    if(device->v3p) {
+        return kv3p_store_effect(device->v3p, KV3P_EFFECT_STATIC, buf, count);
+    }
 
     if (count != 3 && count != 4) {
         dev_warn(dev, "razerkraken: Static mode only accepts RGB (3byte) or RGB with intensity (4byte)\n");
@@ -393,6 +410,11 @@ static ssize_t razer_attr_write_matrix_effect_custom(struct device *dev, struct 
 static ssize_t razer_attr_read_matrix_effect_static(struct device *dev, struct device_attribute *attr, char *buf)
 {
     struct razer_kraken_device *device = dev_get_drvdata(dev);
+
+    if(device->v3p) {
+        return kv3p_show_effect_static(device->v3p, buf);
+    }
+
     return get_rgb_from_addr(dev, device->breathing_address[0], 0x04, buf);
 }
 
@@ -566,6 +588,10 @@ static ssize_t razer_attr_read_device_serial(struct device *dev, struct device_a
     struct razer_kraken_device *device = dev_get_drvdata(dev);
     struct razer_kraken_request_report report = get_kraken_request_report(0x04, 0x20, 0x16, 0x7f00);
 
+    if(device->v3p) {
+        return kv3p_show_serial(device->v3p, buf);
+    }
+
     // Basically some simple caching
     // Also skips going to device if it doesn't contain the serial
     if(device->serial[0] == '\0') {
@@ -605,6 +631,10 @@ static ssize_t razer_attr_read_firmware_version(struct device *dev, struct devic
     struct razer_kraken_device *device = dev_get_drvdata(dev);
     struct razer_kraken_request_report report = get_kraken_request_report(0x04, 0x20, 0x02, 0x0030);
 
+    if(device->v3p) {
+        return kv3p_show_firmware_version(device->v3p, buf);
+    }
+
     // Basically some simple caching
     if(device->firmware_version[0] != 1) {
 
@@ -638,7 +668,14 @@ static ssize_t razer_attr_read_firmware_version(struct device *dev, struct devic
  */
 static ssize_t razer_attr_read_matrix_current_effect(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    unsigned char current_effect = get_current_effect(dev);
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    unsigned char current_effect;
+
+    if(device->v3p) {
+        return kv3p_show_current_effect(device->v3p, buf);
+    }
+
+    current_effect = get_current_effect(dev);
 
     return sysfs_emit(buf, "%02x\n", current_effect);
 }
@@ -664,6 +701,70 @@ static ssize_t razer_attr_read_device_mode(struct device *dev, struct device_att
     return 2;
 }
 
+/*
+ * Kraken V3 Pro only: brightness, battery, power saving, HyperSense and sidetone.
+ * The work is done in razerkraken_v3pro.c; these files exist only for that device.
+ */
+static ssize_t razer_attr_read_matrix_brightness(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_brightness(device->v3p, buf);
+}
+
+static ssize_t razer_attr_write_matrix_brightness(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_store_brightness(device->v3p, buf, count);
+}
+
+static ssize_t razer_attr_read_charge_level(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_charge_level(device->v3p, buf);
+}
+
+static ssize_t razer_attr_read_charge_status(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_charge_status(device->v3p, buf);
+}
+
+static ssize_t razer_attr_read_device_idle_time(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_idle_time(device->v3p, buf);
+}
+
+static ssize_t razer_attr_write_device_idle_time(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_store_idle_time(device->v3p, buf, count);
+}
+
+static ssize_t razer_attr_read_haptic_intensity(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_haptic_intensity(device->v3p, buf);
+}
+
+static ssize_t razer_attr_write_haptic_intensity(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_store_haptic_intensity(device->v3p, buf, count);
+}
+
+static ssize_t razer_attr_read_sidetone(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_sidetone(device->v3p, buf);
+}
+
+static ssize_t razer_attr_write_sidetone(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_store_sidetone(device->v3p, buf, count);
+}
+
 /**
  * Set up the device driver files
 
@@ -686,6 +787,13 @@ static DEVICE_ATTR(matrix_effect_spectrum,  0220, NULL,                         
 static DEVICE_ATTR(matrix_effect_static,    0660, razer_attr_read_matrix_effect_static,       razer_attr_write_matrix_effect_static);
 static DEVICE_ATTR(matrix_effect_custom,    0660, razer_attr_read_matrix_effect_custom,       razer_attr_write_matrix_effect_custom);
 static DEVICE_ATTR(matrix_effect_breath,    0660, razer_attr_read_matrix_effect_breath,       razer_attr_write_matrix_effect_breath);
+static DEVICE_ATTR(matrix_brightness,       0660, razer_attr_read_matrix_brightness,          razer_attr_write_matrix_brightness);
+
+static DEVICE_ATTR(charge_level,            0440, razer_attr_read_charge_level,               NULL);
+static DEVICE_ATTR(charge_status,           0440, razer_attr_read_charge_status,              NULL);
+static DEVICE_ATTR(device_idle_time,        0660, razer_attr_read_device_idle_time,           razer_attr_write_device_idle_time);
+static DEVICE_ATTR(haptic_intensity,        0660, razer_attr_read_haptic_intensity,           razer_attr_write_haptic_intensity);
+static DEVICE_ATTR(sidetone,                0660, razer_attr_read_sidetone,                   razer_attr_write_sidetone);
 
 static void razer_kraken_init(struct razer_kraken_device *dev, struct usb_interface *intf, struct hid_device *hdev)
 {
@@ -745,7 +853,20 @@ static int razer_kraken_probe(struct hid_device *hdev, const struct hid_device_i
     // Init data
     razer_kraken_init(dev, intf, hdev);
 
-    if(dev->usb_interface_protocol == USB_INTERFACE_PROTOCOL_NONE) {
+    if(dev->usb_pid == USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO) {
+        // Settings go over the dongle's CDC interfaces; this HID interface only has media keys
+        dev->v3p = kv3p_get(usb_dev);
+        if(dev->v3p == NULL) {
+            retval = -ENOMEM;
+            goto exit_free;
+        }
+    }
+
+    // Set before the files appear: their callbacks use it
+    dev_set_drvdata(&hdev->dev, dev);
+
+    // The V3 Pro's HID interface is a boot keyboard (protocol 1), but it's the only one it has
+    if(dev->usb_interface_protocol == USB_INTERFACE_PROTOCOL_NONE || dev->usb_pid == USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO) {
         CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_version);                               // Get driver version
         CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_test);                                  // Test mode
         CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_device_type);                           // Get string of device type
@@ -772,17 +893,29 @@ static int razer_kraken_probe(struct hid_device *hdev, const struct hid_device_i
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_matrix_effect_breath);          // Breathing effect
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_matrix_current_effect);         // Get current effect
             break;
+        case USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO:
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_matrix_effect_none);            // No effect (LEDs off)
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_matrix_effect_spectrum);        // The headset's own rainbow
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_matrix_effect_static);          // Static effect
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_matrix_current_effect);         // Get current effect
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_matrix_brightness);             // Brightness
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_charge_level);                  // Battery level
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_charge_status);                 // On the charge cable
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_device_idle_time);              // Power saving (auto off)
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_haptic_intensity);              // HyperSense haptics
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_sidetone);                      // Sidetone
+            break;
         }
     }
 
-    dev_set_drvdata(&hdev->dev, dev);
-
-    if(hid_parse(hdev)) {
+    retval = hid_parse(hdev);
+    if(retval) {
         hid_err(hdev, "parse failed\n");
         goto exit_free;
     }
 
-    if (hid_hw_start(hdev, HID_CONNECT_DEFAULT)) {
+    retval = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
+    if (retval) {
         hid_err(hdev, "hw start failed\n");
         goto exit_free;
     }
@@ -792,6 +925,7 @@ static int razer_kraken_probe(struct hid_device *hdev, const struct hid_device_i
     return 0;
 
 exit_free:
+    kv3p_put(dev->v3p);
     kfree(dev);
     return retval;
 }
@@ -805,7 +939,7 @@ static void razer_kraken_disconnect(struct hid_device *hdev)
 
     dev = hid_get_drvdata(hdev);
 
-    if(dev->usb_interface_protocol == USB_INTERFACE_PROTOCOL_NONE) {
+    if(dev->usb_interface_protocol == USB_INTERFACE_PROTOCOL_NONE || dev->usb_pid == USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO) {
         device_remove_file(&hdev->dev, &dev_attr_version);                               // Get driver version
         device_remove_file(&hdev->dev, &dev_attr_test);                                  // Test mode
         device_remove_file(&hdev->dev, &dev_attr_device_type);                           // Get string of device type
@@ -833,10 +967,23 @@ static void razer_kraken_disconnect(struct hid_device *hdev)
             device_remove_file(&hdev->dev, &dev_attr_matrix_effect_breath);          // Breathing effect
             device_remove_file(&hdev->dev, &dev_attr_matrix_current_effect);         // Get current effect
             break;
+        case USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO:
+            device_remove_file(&hdev->dev, &dev_attr_matrix_effect_none);            // No effect (LEDs off)
+            device_remove_file(&hdev->dev, &dev_attr_matrix_effect_spectrum);        // The headset's own rainbow
+            device_remove_file(&hdev->dev, &dev_attr_matrix_effect_static);          // Static effect
+            device_remove_file(&hdev->dev, &dev_attr_matrix_current_effect);         // Get current effect
+            device_remove_file(&hdev->dev, &dev_attr_matrix_brightness);             // Brightness
+            device_remove_file(&hdev->dev, &dev_attr_charge_level);                  // Battery level
+            device_remove_file(&hdev->dev, &dev_attr_charge_status);                 // On the charge cable
+            device_remove_file(&hdev->dev, &dev_attr_device_idle_time);              // Power saving (auto off)
+            device_remove_file(&hdev->dev, &dev_attr_haptic_intensity);              // HyperSense haptics
+            device_remove_file(&hdev->dev, &dev_attr_sidetone);                      // Sidetone
+            break;
         }
     }
 
     hid_hw_stop(hdev);
+    kv3p_put(dev->v3p);
     kfree(dev);
     hid_info(hdev, "Razer Device disconnected\n");
 }
@@ -844,6 +991,11 @@ static void razer_kraken_disconnect(struct hid_device *hdev)
 static int razer_raw_event(struct hid_device *hdev, struct hid_report *report, u8 *data, int size)
 {
     struct razer_kraken_device *device = dev_get_drvdata(&hdev->dev);
+
+    // The V3 Pro's HID reports are its media keys, handled by hid-input
+    if(device->v3p) {
+        return 0;
+    }
 
     //dev_warn(dev, "razerkraken: Got raw message %d\n", size);
 
@@ -867,6 +1019,7 @@ static const struct hid_device_id razer_devices[] = {
     { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_KRAKEN_V2) },
     { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_KRAKEN_TE) },
     { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_KRAKEN_ULTIMATE) },
+    { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO) },
     { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_KRAKEN_KITTY_V2) },
     { 0 }
 };
@@ -884,4 +1037,27 @@ static struct hid_driver razer_kraken_driver = {
     .raw_event = razer_raw_event
 };
 
-module_hid_driver(razer_kraken_driver);
+static int __init razer_kraken_module_init(void)
+{
+    // The Kraken V3 Pro's CDC side is a usb_driver in this module too
+    int retval = kv3p_register();
+
+    if(retval) {
+        return retval;
+    }
+
+    retval = hid_register_driver(&razer_kraken_driver);
+    if(retval) {
+        kv3p_unregister();
+    }
+    return retval;
+}
+
+static void __exit razer_kraken_module_exit(void)
+{
+    hid_unregister_driver(&razer_kraken_driver);
+    kv3p_unregister();
+}
+
+module_init(razer_kraken_module_init);
+module_exit(razer_kraken_module_exit);

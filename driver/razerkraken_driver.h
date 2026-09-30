@@ -12,11 +12,14 @@
 #define USB_DEVICE_ID_RAZER_KRAKEN_V2 0x0510 // Codename Kylie
 #define USB_DEVICE_ID_RAZER_KRAKEN_TE 0x0520
 #define USB_DEVICE_ID_RAZER_KRAKEN_ULTIMATE 0x0527
+#define USB_DEVICE_ID_RAZER_KRAKEN_V3_PRO 0x052C // HyperSpeed dongle; control over CDC, see razerkraken_v3pro.c
 #define USB_DEVICE_ID_RAZER_KRAKEN_KITTY_V2 0x0560
 
 #define USB_INTERFACE_PROTOCOL_NONE 0
 
 // #define RAZER_KRAKEN_V2_REPORT_LEN ?
+
+struct kv3p;
 
 struct razer_kraken_device {
     struct hid_device *hdev;
@@ -37,6 +40,7 @@ struct razer_kraken_device {
 
     u8 data[33];
 
+    struct kv3p *v3p; // Kraken V3 Pro only: the dongle's control channel (razerkraken_v3pro.c)
 };
 
 union razer_kraken_effect_byte {

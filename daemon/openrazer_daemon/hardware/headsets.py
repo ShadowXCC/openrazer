@@ -216,7 +216,9 @@ class RazerKrakenV3Pro(__RazerDeviceBrightnessSuspend):
     METHODS = ['get_device_type_headset',
                'set_static_effect', 'set_spectrum_effect', 'set_none_effect',
                'get_battery', 'is_charging', 'get_idle_time', 'set_idle_time',
-               'get_sidetone', 'set_sidetone', 'get_haptic_intensity', 'set_haptic_intensity']
+               'get_sidetone', 'set_sidetone', 'get_haptic_intensity', 'set_haptic_intensity',
+               'get_haptic_charging_override', 'set_haptic_charging_override',
+               'get_lighting_charging_override', 'set_lighting_charging_override']
 
     DEVICE_IMAGE = "https://assets3.razerzone.com/qJyFg5OTeAdMCtwboWHEvMexeDQ=/1500x1000/https%3A%2F%2Fmedias-p1.phoenix.razer.com%2Fsys-master-phoenix-images-container%2Fha7%2Fh93%2F9248880263198%2F211021-kraken-v3-pro-1500x1000-6.jpg"
 

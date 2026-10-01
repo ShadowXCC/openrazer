@@ -82,3 +82,73 @@ def set_haptic_intensity(self, intensity):
 
     with open(driver_path, 'w') as driver_file:
         driver_file.write(str(intensity))
+
+
+@endpoint('razer.device.power', 'getHapticChargingOverride', out_sig='b')
+def get_haptic_charging_override(self):
+    """
+    Get whether haptics are being kept on while the headset charges
+
+    :return: True when the driver is holding the headset's haptic gate clear
+    :rtype: bool
+    """
+    self.logger.debug("DBus call get_haptic_charging_override")
+
+    driver_path = self.get_driver_path('haptic_charging_override')
+
+    with open(driver_path, 'r') as driver_file:
+        return bool(int(driver_file.read().strip()))
+
+
+@endpoint('razer.device.power', 'setHapticChargingOverride', in_sig='b')
+def set_haptic_charging_override(self, enable):
+    """
+    Keep haptics working while the headset charges
+
+    The headset's firmware disables them whenever the charge cable carries power. This clears
+    that, and the driver re-applies it whenever the firmware sets it again. Razer disables them
+    on purpose: the earcup gets warm, so don't leave this on unattended.
+
+    :param enable: True to keep haptics on while charging
+    :type enable: bool
+    """
+    self.logger.debug("DBus call set_haptic_charging_override")
+
+    driver_path = self.get_driver_path('haptic_charging_override')
+
+    with open(driver_path, 'w') as driver_file:
+        driver_file.write('1' if enable else '0')
+
+
+@endpoint('razer.device.power', 'getLightingChargingOverride', out_sig='b')
+def get_lighting_charging_override(self):
+    """
+    Get whether the earcup lighting is being kept on while the headset charges
+
+    :return: True when the driver is holding the headset's lighting gate clear
+    :rtype: bool
+    """
+    self.logger.debug("DBus call get_lighting_charging_override")
+
+    driver_path = self.get_driver_path('lighting_charging_override')
+
+    with open(driver_path, 'r') as driver_file:
+        return bool(int(driver_file.read().strip()))
+
+
+@endpoint('razer.device.power', 'setLightingChargingOverride', in_sig='b')
+def set_lighting_charging_override(self, enable):
+    """
+    Keep the earcup lighting on while the headset charges
+
+    The same gate as the haptics one, for the Chroma LEDs.
+
+    :param enable: True to keep the earcup lighting on while charging
+    :type enable: bool
+    """
+    self.logger.debug("DBus call set_lighting_charging_override")
+
+    driver_path = self.get_driver_path('lighting_charging_override')
+
+    with open(driver_path, 'w') as driver_file:
+        driver_file.write('1' if enable else '0')

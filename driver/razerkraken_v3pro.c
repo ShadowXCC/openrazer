@@ -61,6 +61,8 @@
 #define KV3P_LINK_TIMEOUT_MS 200
 #define KV3P_WRITE_GAP_MS 250
 #define KV3P_SETTLE_MS 1500
+#define KV3P_GATE_SETTLE_MS 2000 /* after charger-connect: the headset sets the gate itself first */
+#define KV3P_GATE_SENDS 2 /* an acked gate frame can still be overridden, so send it twice */
 #define KV3P_RETRY_MS 5000
 #define KV3P_TRIES 6
 #define KV3P_JAM_THRESHOLD 3
@@ -77,6 +79,8 @@
 #define KV3P_CMD_BRIGHTNESS 0x8E
 #define KV3P_CMD_HYPERSENSE 0x8A
 #define KV3P_NOTIFY_HYPERSENSE 0x90
+#define KV3P_CMD_SWITCH_CHROMA 0x93
+#define KV3P_CMD_SWITCH_HAPTIC 0x94
 
 #define KV3P_FALLBACK_SERIAL "XX000000052C"
 
@@ -86,6 +90,21 @@
 #else
 #define KV3P_WQ system_wq
 #endif
+
+/*
+ * The charging overrides, remembered at module scope. A kv3p context is keyed on the usb_device
+ * and freed when the dongle goes, so these seed each new context and survive a dongle replug.
+ * Setting them in /etc/modprobe.d makes them survive a reboot too. Both default to off.
+ */
+static bool haptic_charging_override;
+module_param(haptic_charging_override, bool, 0644);
+MODULE_PARM_DESC(haptic_charging_override,
+                 "Kraken V3 Pro: keep HyperSense working while the headset charges (default off)");
+
+static bool lighting_charging_override;
+module_param(lighting_charging_override, bool, 0644);
+MODULE_PARM_DESC(lighting_charging_override,
+                 "Kraken V3 Pro: keep the earcup lighting on while the headset charges (default off)");
 
 static const u8 kv3p_prefix_set[3] = { 0x02, 0x21, 0x40 };
 static const u8 kv3p_prefix_sidetone[3] = { 0x02, 0x21, 0x25 };
@@ -156,6 +175,11 @@ struct kv3p {
     bool st_valid;
     u8 st_on;
     u8 st_level;
+    bool charger; /* the charger bit of the last battery report */
+    bool charger_valid;
+    bool haptic_override; /* desired: HyperSense stays on while charging */
+    bool chroma_override; /* desired: the earcup lighting stays on while charging */
+    unsigned int gate_resend; /* refresh passes that still owe a gate re-send */
 
     struct completion init_done;
     struct delayed_work refresh_work;
@@ -205,6 +229,8 @@ struct kv3p *kv3p_get(struct usb_device *udev)
     /* The headset boots into its onboard effect. */
     ctx->effect = KV3P_EFFECT_SPECTRUM;
     ctx->brightness = 0xFF;
+    ctx->haptic_override = haptic_charging_override;
+    ctx->chroma_override = lighting_charging_override;
     list_add(&ctx->node, &kv3p_list);
 out:
     mutex_unlock(&kv3p_list_lock);
@@ -273,6 +299,18 @@ static void kv3p_frame_brightness(u8 *frame, u8 level)
 static void kv3p_frame_hypersense(u8 *frame, u8 on, u8 level)
 {
     const u8 body[] = { KV3P_CMD_HYPERSENSE, 0x00, on, level };
+
+    kv3p_build(frame, kv3p_prefix_set, body, sizeof(body));
+}
+
+/*
+ * switch_haptic (0x94) and switch_chroma (0x93): the headset's own master gates. Unlike every
+ * other frame here these two were not captured from Synapse, which never sends them; they come
+ * from the STM32's command handler. enable=1 clears the gate the firmware sets while charging.
+ */
+static void kv3p_frame_switch_gate(u8 *frame, u8 cmd, u8 enable)
+{
+    const u8 body[] = { cmd, enable };
 
     kv3p_build(frame, kv3p_prefix_set, body, sizeof(body));
 }
@@ -353,8 +391,18 @@ static void kv3p_rx_razer(struct kv3p *ctx, const u8 *pl, unsigned int n)
 
     if (!memcmp(pl, kv3p_prefix_battery, 3) && n >= 7) {
         u16 mv = (pl[4] << 8) | pl[5];
+        bool charger = !!(pl[3] & 0x04);
 
         ctx->batt_state = pl[3];
+        /* The firmware re-sets both gates when the charger appears, over an internal chip link
+         * that we can't see, so this report is the only sign of it we get. */
+        if (charger && (!ctx->charger_valid || !ctx->charger) &&
+            (ctx->haptic_override || ctx->chroma_override)) {
+            ctx->gate_resend = KV3P_GATE_SENDS;
+            mod_delayed_work(KV3P_WQ, &ctx->refresh_work, msecs_to_jiffies(KV3P_GATE_SETTLE_MS));
+        }
+        ctx->charger = charger;
+        ctx->charger_valid = true;
         /* The first report after a link-up carries 0 mV and no usable level. */
         if (mv) {
             ctx->batt_mv = mv;
@@ -659,13 +707,47 @@ static bool kv3p_link_up(struct kv3p *ctx)
 }
 
 /*
+ * Clear whichever charging gates the user has armed. While a gate is set the headset acks
+ * HyperSense and lighting writes and then discards them, so this has to go out before them.
+ * io_lock held. True when every frame it had to send was acked.
+ */
+static bool kv3p_apply_gates(struct kv3p *ctx)
+{
+    u8 frame[KV3P_FRAME_LEN];
+    unsigned long flags;
+    bool haptic, chroma;
+    bool ok = true;
+
+    spin_lock_irqsave(&ctx->rx_lock, flags);
+    haptic = ctx->haptic_override;
+    chroma = ctx->chroma_override;
+    spin_unlock_irqrestore(&ctx->rx_lock, flags);
+
+    if (haptic) {
+        kv3p_frame_switch_gate(frame, KV3P_CMD_SWITCH_HAPTIC, 1);
+        if (kv3p_relay(ctx, frame, KV3P_WAIT_ACK, KV3P_CMD_SWITCH_HAPTIC))
+            ok = false;
+    }
+    if (chroma) {
+        kv3p_frame_switch_gate(frame, KV3P_CMD_SWITCH_CHROMA, 1);
+        if (kv3p_relay(ctx, frame, KV3P_WAIT_ACK, KV3P_CMD_SWITCH_CHROMA))
+            ok = false;
+    }
+    return ok;
+}
+
+/*
  * After the CDC side binds, and 1.5 s after every link-up: learn the link state, read what the
- * headset reports, then re-apply the lighting until it's acked (every 5 s, at most 6 times).
+ * headset reports, then re-apply the charging gates and the lighting until they're acked (every
+ * 5 s, at most 6 times). Also runs 2 s after the charger appears, which is when the headset
+ * re-sets the gates.
  */
 static void kv3p_refresh_work(struct work_struct *work)
 {
     struct kv3p *ctx = container_of(to_delayed_work(work), struct kv3p, refresh_work);
     unsigned long flags;
+    unsigned int gates;
+    bool again = false;
     bool linkup;
 
     mutex_lock(&ctx->io_lock);
@@ -675,8 +757,11 @@ static void kv3p_refresh_work(struct work_struct *work)
     spin_lock_irqsave(&ctx->rx_lock, flags);
     linkup = ctx->linkup_pending;
     ctx->linkup_pending = false;
+    gates = ctx->gate_resend;
+    if (gates)
+        ctx->gate_resend = gates - 1;
     spin_unlock_irqrestore(&ctx->rx_lock, flags);
-    if (linkup)
+    if (linkup || gates == KV3P_GATE_SENDS)
         ctx->refresh_try = 0;
 
     if (!kv3p_link_up(ctx))
@@ -693,8 +778,16 @@ static void kv3p_refresh_work(struct work_struct *work)
     }
     complete_all(&ctx->init_done);
 
-    if (ctx->lighting_set && kv3p_link_up(ctx) && !READ_ONCE(ctx->jammed) &&
-        !kv3p_apply_lighting(ctx) && ++ctx->refresh_try < KV3P_TRIES && kv3p_link_up(ctx))
+    if (kv3p_link_up(ctx) && !READ_ONCE(ctx->jammed)) {
+        /* The gates first: while one is set, what it gates is acked and then dropped. */
+        if (!kv3p_apply_gates(ctx))
+            again = true;
+        if (ctx->lighting_set && !kv3p_apply_lighting(ctx))
+            again = true;
+        if (gates > 1)
+            again = true;
+    }
+    if (again && ++ctx->refresh_try < KV3P_TRIES && kv3p_link_up(ctx))
         queue_delayed_work(KV3P_WQ, &ctx->refresh_work, msecs_to_jiffies(KV3P_RETRY_MS));
 out:
     mutex_unlock(&ctx->io_lock);
@@ -1304,4 +1397,102 @@ ssize_t kv3p_show_sidetone(struct kv3p *ctx, char *buf)
         value = ctx->st_on ? ctx->st_level + 1 : 0;
     spin_unlock_irqrestore(&ctx->rx_lock, flags);
     return sysfs_emit(buf, "%d\n", value);
+}
+
+/*
+ * The charging overrides. The headset gates HyperSense and the earcup lighting whenever the
+ * charge cable carries power: its radio chip tells the audio chip to shut them off, and the
+ * audio chip then acks what it is told and discards it. The gate is RAM in the headset, re-set
+ * on every charger-connect, and the re-assertion travels over an internal chip link that no
+ * host-side monitor can see. So the driver can't observe the gate -- it holds the intent and
+ * re-sends it on the events that cause it (kv3p_apply_gates), as it does for lighting.
+ *
+ * That is why a store always succeeds and a show never reports -1, unlike the settings above:
+ * there is no read command for either gate, so the driver's own intent is all there is to say.
+ */
+static ssize_t kv3p_store_gate(struct kv3p *ctx, u8 cmd, bool *want, bool *remembered,
+                               const char *what, const char *why, const char *buf, size_t count)
+{
+    u8 frame[KV3P_FRAME_LEN];
+    unsigned long flags;
+    bool arming, charging;
+    u8 value;
+    int ret;
+
+    ret = kstrtou8(buf, 10, &value);
+    if (ret)
+        return ret;
+    if (value > 1)
+        return -EINVAL;
+
+    spin_lock_irqsave(&ctx->rx_lock, flags);
+    arming = value && !*want;
+    *want = value;
+    charging = ctx->charger_valid && ctx->charger;
+    spin_unlock_irqrestore(&ctx->rx_lock, flags);
+    /* Remembered at module scope, so a dongle replug (which frees this context) keeps it. */
+    *remembered = value;
+
+    if (arming)
+        dev_warn(&ctx->udev->dev,
+                 "kraken v3 pro: %s will be kept on while the headset charges. Razer disables it deliberately: %s. The earcup also carries the charger's heat on top of its own, so keep it below 40 C\n",
+                 what, why);
+
+    /*
+     * Disabling only sends a frame while the cable is in. On battery the gate is already clear,
+     * and switch_haptic(0) there would stop the haptics outright: never a side effect of this.
+     */
+    if (value || charging) {
+        kv3p_frame_switch_gate(frame, cmd, value);
+        mutex_lock(&ctx->io_lock);
+        if (ctx->data && !ctx->wedged && !READ_ONCE(ctx->jammed)) {
+            if (kv3p_relay(ctx, frame, KV3P_WAIT_ACK, cmd)) {
+                if (value && kv3p_link_up(ctx))
+                    mod_delayed_work(KV3P_WQ, &ctx->refresh_work,
+                                     msecs_to_jiffies(KV3P_RETRY_MS));
+            } else if (value && cmd == KV3P_CMD_SWITCH_CHROMA && ctx->lighting_set) {
+                /* The gate swallowed the lighting we last sent; put it back now it's clear. */
+                kv3p_apply_lighting(ctx);
+            }
+        }
+        mutex_unlock(&ctx->io_lock);
+    }
+    return count;
+}
+
+static ssize_t kv3p_show_gate(struct kv3p *ctx, const bool *want, char *buf)
+{
+    unsigned long flags;
+    bool on;
+
+    spin_lock_irqsave(&ctx->rx_lock, flags);
+    on = *want;
+    spin_unlock_irqrestore(&ctx->rx_lock, flags);
+    return sysfs_emit(buf, "%d\n", on);
+}
+
+ssize_t kv3p_store_haptic_charging_override(struct kv3p *ctx, const char *buf, size_t count)
+{
+    return kv3p_store_gate(ctx, KV3P_CMD_SWITCH_HAPTIC, &ctx->haptic_override,
+                           &haptic_charging_override, "HyperSense",
+                           "a 500 mA USB port may not cover charging plus haptic peaks",
+                           buf, count);
+}
+
+ssize_t kv3p_show_haptic_charging_override(struct kv3p *ctx, char *buf)
+{
+    return kv3p_show_gate(ctx, &ctx->haptic_override, buf);
+}
+
+ssize_t kv3p_store_lighting_charging_override(struct kv3p *ctx, const char *buf, size_t count)
+{
+    return kv3p_store_gate(ctx, KV3P_CMD_SWITCH_CHROMA, &ctx->chroma_override,
+                           &lighting_charging_override, "the earcup lighting",
+                           "it adds load while the battery is charging",
+                           buf, count);
+}
+
+ssize_t kv3p_show_lighting_charging_override(struct kv3p *ctx, char *buf)
+{
+    return kv3p_show_gate(ctx, &ctx->chroma_override, buf);
 }

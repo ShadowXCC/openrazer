@@ -59,6 +59,8 @@ class RazerDevice(object):
 
             'sidetone': self._has_feature('razer.device.audio', ('getSidetone', 'setSidetone')),
             'haptic_intensity': self._has_feature('razer.device.haptics', ('getHapticIntensity', 'setHapticIntensity')),
+            'haptic_charging_override': self._has_feature('razer.device.power', ('getHapticChargingOverride', 'setHapticChargingOverride')),
+            'lighting_charging_override': self._has_feature('razer.device.power', ('getLightingChargingOverride', 'setLightingChargingOverride')),
 
             'macro_logic': self._has_feature('razer.device.macro'),
             'keyboard_layout': self._has_feature('razer.device.misc', 'getKeyboardLayout'),
@@ -242,7 +244,7 @@ class RazerDevice(object):
 
         if self.has('dpi'):
             self._dbus_interfaces['dpi'] = _dbus.Interface(self._dbus, "razer.device.dpi")
-        if self.has('battery'):
+        if self.has('battery') or self.has('haptic_charging_override') or self.has('lighting_charging_override'):
             self._dbus_interfaces['power'] = _dbus.Interface(self._dbus, "razer.device.power")
         if self.has('sidetone'):
             self._dbus_interfaces['audio'] = _dbus.Interface(self._dbus, "razer.device.audio")
@@ -553,6 +555,58 @@ class RazerDevice(object):
         """
         if self.has('haptic_intensity'):
             self._dbus_interfaces['haptics'].setHapticIntensity(value)
+        else:
+            raise NotImplementedError()
+
+    @property
+    def haptic_charging_override(self) -> bool:
+        """
+        Get whether haptics are kept working while the headset charges
+
+        :return: True when the driver is holding the headset's haptic gate clear
+        """
+        if self.has('haptic_charging_override'):
+            return bool(self._dbus_interfaces['power'].getHapticChargingOverride())
+        else:
+            raise NotImplementedError()
+
+    @haptic_charging_override.setter
+    def haptic_charging_override(self, value: bool) -> None:
+        """
+        Keep haptics working while the headset charges
+
+        The firmware disables them whenever the charge cable carries power; this clears that, and
+        the driver re-applies it whenever the firmware sets it again. Razer disables them on
+        purpose, so mind the heat in the earcup.
+
+        :param value: True to keep haptics on while charging
+        """
+        if self.has('haptic_charging_override'):
+            self._dbus_interfaces['power'].setHapticChargingOverride(bool(value))
+        else:
+            raise NotImplementedError()
+
+    @property
+    def lighting_charging_override(self) -> bool:
+        """
+        Get whether the earcup lighting is kept on while the headset charges
+
+        :return: True when the driver is holding the headset's lighting gate clear
+        """
+        if self.has('lighting_charging_override'):
+            return bool(self._dbus_interfaces['power'].getLightingChargingOverride())
+        else:
+            raise NotImplementedError()
+
+    @lighting_charging_override.setter
+    def lighting_charging_override(self, value: bool) -> None:
+        """
+        Keep the earcup lighting on while the headset charges
+
+        :param value: True to keep the earcup lighting on while charging
+        """
+        if self.has('lighting_charging_override'):
+            self._dbus_interfaces['power'].setLightingChargingOverride(bool(value))
         else:
             raise NotImplementedError()
 

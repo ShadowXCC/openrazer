@@ -8,12 +8,15 @@
  * over from cdc_acm) and keeps the channel open, which the dongle requires for its notifications.
  * The HID side (razerkraken_driver.c) exposes the sysfs attributes and calls in here.
  *
- * Protocol, with thanks to paladin-devops (openrazer PR #2884) for the first lighting frames:
+ * Protocol, with thanks to paladin-devops (openrazer PR #2884) for the first lighting frames.
+ * Every frame below was captured from Synapse except the two charging gates (93/94), which
+ * Synapse never sends: those come from the headset firmware's own command handler.
  *
  *   host -> dongle, 28 bytes, bulk OUT 0x06:
  *     01 f3 ff 18 | P0 P1 P2 | b7 | b8..b26 | CS     CS makes sum(b7..CS) == 0 mod 256
  *     02 21 40 8c 00 00 08 00 R G B   static colour        02 21 40 8c 00 00 03   onboard effect
  *     02 21 40 8e 00 00 LL            brightness           02 21 40 8a 00 ON LL   HyperSense
+ *     02 21 40 94 EN                  HyperSense charging gate (EN=1 clears it; 93 is lighting)
  *     02 21 25 ON LL                  sidetone             02 21 26 ON S0 S1      power saving (s, LE)
  *     02 20 20/21/24/26               read firmware, serial, battery, power saving
  *   host -> dongle, 4 bytes: 01 9a fc 00   link query, answered by the dongle itself
@@ -62,5 +65,9 @@ ssize_t kv3p_store_haptic_intensity(struct kv3p *ctx, const char *buf, size_t co
 ssize_t kv3p_show_haptic_intensity(struct kv3p *ctx, char *buf);
 ssize_t kv3p_store_sidetone(struct kv3p *ctx, const char *buf, size_t count);
 ssize_t kv3p_show_sidetone(struct kv3p *ctx, char *buf);
+ssize_t kv3p_store_haptic_charging_override(struct kv3p *ctx, const char *buf, size_t count);
+ssize_t kv3p_show_haptic_charging_override(struct kv3p *ctx, char *buf);
+ssize_t kv3p_store_lighting_charging_override(struct kv3p *ctx, const char *buf, size_t count);
+ssize_t kv3p_show_lighting_charging_override(struct kv3p *ctx, char *buf);
 
 #endif

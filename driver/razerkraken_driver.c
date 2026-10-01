@@ -702,7 +702,8 @@ static ssize_t razer_attr_read_device_mode(struct device *dev, struct device_att
 }
 
 /*
- * Kraken V3 Pro only: brightness, battery, power saving, HyperSense and sidetone.
+ * Kraken V3 Pro only: brightness, battery, power saving, HyperSense, sidetone and the two
+ * charging overrides.
  * The work is done in razerkraken_v3pro.c; these files exist only for that device.
  */
 static ssize_t razer_attr_read_matrix_brightness(struct device *dev, struct device_attribute *attr, char *buf)
@@ -774,6 +775,30 @@ static ssize_t razer_attr_write_sidetone(struct device *dev, struct device_attri
  * Read and write is 0664
  */
 
+static ssize_t razer_attr_read_haptic_charging_override(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_haptic_charging_override(device->v3p, buf);
+}
+
+static ssize_t razer_attr_write_haptic_charging_override(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_store_haptic_charging_override(device->v3p, buf, count);
+}
+
+static ssize_t razer_attr_read_lighting_charging_override(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_show_lighting_charging_override(device->v3p, buf);
+}
+
+static ssize_t razer_attr_write_lighting_charging_override(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return kv3p_store_lighting_charging_override(device->v3p, buf, count);
+}
+
 static DEVICE_ATTR(test,                    0660, razer_attr_read_test,                       razer_attr_write_test);
 static DEVICE_ATTR(version,                 0440, razer_attr_read_version,                    NULL);
 static DEVICE_ATTR(device_type,             0440, razer_attr_read_device_type,                NULL);
@@ -794,6 +819,8 @@ static DEVICE_ATTR(charge_status,           0440, razer_attr_read_charge_status,
 static DEVICE_ATTR(device_idle_time,        0660, razer_attr_read_device_idle_time,           razer_attr_write_device_idle_time);
 static DEVICE_ATTR(haptic_intensity,        0660, razer_attr_read_haptic_intensity,           razer_attr_write_haptic_intensity);
 static DEVICE_ATTR(sidetone,                0660, razer_attr_read_sidetone,                   razer_attr_write_sidetone);
+static DEVICE_ATTR(haptic_charging_override,   0660, razer_attr_read_haptic_charging_override,   razer_attr_write_haptic_charging_override);
+static DEVICE_ATTR(lighting_charging_override, 0660, razer_attr_read_lighting_charging_override, razer_attr_write_lighting_charging_override);
 
 static void razer_kraken_init(struct razer_kraken_device *dev, struct usb_interface *intf, struct hid_device *hdev)
 {
@@ -904,6 +931,8 @@ static int razer_kraken_probe(struct hid_device *hdev, const struct hid_device_i
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_device_idle_time);              // Power saving (auto off)
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_haptic_intensity);              // HyperSense haptics
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_sidetone);                      // Sidetone
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_haptic_charging_override);       // Keep HyperSense on while charging
+            CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_lighting_charging_override);     // Keep the earcup lighting on while charging
             break;
         }
     }
@@ -978,6 +1007,8 @@ static void razer_kraken_disconnect(struct hid_device *hdev)
             device_remove_file(&hdev->dev, &dev_attr_device_idle_time);              // Power saving (auto off)
             device_remove_file(&hdev->dev, &dev_attr_haptic_intensity);              // HyperSense haptics
             device_remove_file(&hdev->dev, &dev_attr_sidetone);                      // Sidetone
+            device_remove_file(&hdev->dev, &dev_attr_haptic_charging_override);       // Keep HyperSense on while charging
+            device_remove_file(&hdev->dev, &dev_attr_lighting_charging_override);     // Keep the earcup lighting on while charging
             break;
         }
     }
